@@ -48,9 +48,15 @@ struct SearchView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
                 
-                TextField("输入搜索关键词（支持多个词，用,或，分隔）...", text: $viewModel.searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(!viewModel.hasWorkingDirectory || viewModel.isLoading)
+                CustomSearchTextField(
+                    text: $viewModel.searchText,
+                    placeholder: "输入搜索关键词（支持多个词，用,或，分隔）...",
+                    onCommit: {
+                        // 回车时触发搜索，但不全选文本
+                        print("🔍 用户按下回车键进行搜索")
+                    }
+                )
+                .disabled(!viewModel.hasWorkingDirectory || viewModel.isLoading)
                 
                 if !viewModel.searchText.isEmpty {
                     Button(action: { viewModel.searchText = "" }) {
