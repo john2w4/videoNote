@@ -58,11 +58,6 @@ struct MarkdownPreviewView: NSViewRepresentable {
     private func convertLocalImagesToBase64(_ markdown: String) -> String {
         var html = markdown
         
-        // 如果没有baseDirectory，直接返回
-        guard let baseDirectory = self.baseDirectory else {
-            return html
-        }
-        
         // 处理标准格式的图片: ![alt](src)
         let standardRegex = try? NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([^)]+)\)"#, options: [])
         if let regex = standardRegex {
@@ -73,13 +68,34 @@ struct MarkdownPreviewView: NSViewRepresentable {
                 let alt = String(html[altRange])
                 let src = String(html[srcRange])
                 
-                // 检查是否是相对路径的本地图片
-                if src.hasPrefix("images/") {
-                    let imagePath = baseDirectory.appendingPathComponent(src)
-                    if let base64String = imageToBase64(imagePath: imagePath) {
-                        let replacement = "<img src=\"data:image/png;base64,\(base64String)\" alt=\"\(alt)\" />"
-                        html = html.replacingCharacters(in: Range(match.range, in: html)!, with: replacement)
+                print("🖼️ 处理图片: alt=\(alt), src=\(src)")
+                
+                // 检查是否是本地图片路径
+                var imagePath: URL?
+                
+                if src.hasPrefix("/") {
+                    // 绝对路径
+                    imagePath = URL(fileURLWithPath: src)
+                    print("📍 使用绝对路径: \(src)")
+                } else if src.hasPrefix("images/") {
+                    // 相对路径（兼容性处理）
+                    if let baseDirectory = self.baseDirectory {
+                        imagePath = baseDirectory.appendingPathComponent(src)
+                        print("📍 使用相对路径: \(baseDirectory.path)/\(src)")
                     }
+                } else if !src.hasPrefix("http") && !src.hasPrefix("data:") {
+                    // 其他本地路径尝试
+                    imagePath = URL(fileURLWithPath: src)
+                    print("📍 尝试本地路径: \(src)")
+                }
+                
+                if let imagePath = imagePath,
+                   let base64String = imageToBase64(imagePath: imagePath) {
+                    let replacement = "<img src=\"data:image/png;base64,\(base64String)\" alt=\"\(alt)\" />"
+                    html = html.replacingCharacters(in: Range(match.range, in: html)!, with: replacement)
+                    print("✅ 图片转换成功: \(imagePath.path)")
+                } else {
+                    print("❌ 图片转换失败: \(src)")
                 }
             }
         }
@@ -99,13 +115,31 @@ struct MarkdownPreviewView: NSViewRepresentable {
                     alt = ""
                 }
                 
-                // 检查是否是相对路径的本地图片
-                if src.hasPrefix("images/") {
-                    let imagePath = baseDirectory.appendingPathComponent(src)
-                    if let base64String = imageToBase64(imagePath: imagePath) {
-                        let replacement = "<img src=\"data:image/png;base64,\(base64String)\" alt=\"\(alt)\" />"
-                        html = html.replacingCharacters(in: Range(match.range, in: html)!, with: replacement)
+                print("🖼️ 处理Obsidian图片: alt=\(alt), src=\(src)")
+                
+                // 检查是否是本地图片路径
+                var imagePath: URL?
+                
+                if src.hasPrefix("/") {
+                    // 绝对路径
+                    imagePath = URL(fileURLWithPath: src)
+                } else if src.hasPrefix("images/") {
+                    // 相对路径（兼容性处理）
+                    if let baseDirectory = self.baseDirectory {
+                        imagePath = baseDirectory.appendingPathComponent(src)
                     }
+                } else if !src.hasPrefix("http") && !src.hasPrefix("data:") {
+                    // 其他本地路径尝试
+                    imagePath = URL(fileURLWithPath: src)
+                }
+                
+                if let imagePath = imagePath,
+                   let base64String = imageToBase64(imagePath: imagePath) {
+                    let replacement = "<img src=\"data:image/png;base64,\(base64String)\" alt=\"\(alt)\" />"
+                    html = html.replacingCharacters(in: Range(match.range, in: html)!, with: replacement)
+                    print("✅ Obsidian图片转换成功: \(imagePath.path)")
+                } else {
+                    print("❌ Obsidian图片转换失败: \(src)")
                 }
             }
         }
@@ -136,9 +170,8 @@ struct MarkdownPreviewView: NSViewRepresentable {
         // 先做基本的 Markdown 转换（但跳过链接处理）
         html = convertBasicMarkdownExceptLinks(html)
         
-        // 然后处理新格式的时间戳链接: [timestamp](视频文件路径 + timestamp)
-        // 匹配格式: [HH:MM:SS](路径 + HH:MM:SS)
-        let newTimestampPattern = #"\[(\d{2}:\d{2}:\d{2})\]\(([^)]+?) \+ (\d{2}:\d{2}:\d{2})\)"#
+        // 处理新格式的时间戳链接: [timestamp](视频文件完整路径#timestamp)
+        let newTimestampPattern = #"\[(\d{2}:\d{2}:\d{2})\]\(([^)#]+)#(\d{2}:\d{2}:\d{2})\)"#
         html = html.replacingOccurrences(
             of: newTimestampPattern,
             with: "<span class=\"timestamp\" data-timestamp=\"$1\" data-video=\"$2\" title=\"跳转到 $1\">$1</span>",

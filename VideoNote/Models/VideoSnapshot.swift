@@ -30,25 +30,28 @@ struct VideoSnapshot: Identifiable {
     
     /// 生成 Markdown 插入文本
     func generateMarkdownInsert() -> String {
-        // 创建包含视频文件路径和时间戳的链接
-        let videoFilePath = videoURL.path
-        let timestampLink = "[\(formattedTimestamp)](\(videoFilePath) + \(formattedTimestamp))"
+        // 获取视频文件名（不含路径）
+        let videoFileName = videoURL.lastPathComponent
         
-        // 生成相对路径的截图引用
-        let screenshotFileName = imageURL.lastPathComponent
-        let screenshotReference = "![[images/\(screenshotFileName)|\(videoFilePath) + \(formattedTimestamp)]]"
+        // 获取截图文件的完整路径
+        let screenshotFullPath = imageURL.path
+        
+        // 获取视频文件的完整路径
+        let videoFullPath = videoURL.path
+        
+        // 生成新格式的 Markdown：![视频文件名 - timestamp](截图文件完整路径)[timestamp](视频文件完整路径#timestamp)
+        let newFormatMarkdown = "![\(videoFileName) - \(formattedTimestamp)](\(screenshotFullPath))[\(formattedTimestamp)](\(videoFullPath)#\(formattedTimestamp))"
         
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        let dateString = dateFormatter.string(from: createdAt)
+//        let dateString = dateFormatter.string(from: createdAt)
         
         var markdown = "\n\n---\n\n"
-        markdown += "## 📸 视频截图 \(timestampLink)\n\n"
-        markdown += "*截图时间: \(dateString) | 视频: \(videoURL.lastPathComponent)*\n\n"
+//        markdown += "## 📸 视频截图 [\(formattedTimestamp)](\(videoFullPath)#\(formattedTimestamp))\n\n"
+//        markdown += "*截图时间: \(dateString) | 视频: \(videoFileName)*\n\n"
         
-        // 使用新格式的截图引用和相对路径的图片显示
-        markdown += "\(screenshotReference)\n\n"
-        markdown += "![视频截图 - \(formattedTimestamp)](images/\(screenshotFileName))\n\n"
+        // 使用新格式的截图和时间戳链接
+        markdown += "\(newFormatMarkdown)\n\n"
         
         if !subtitleText.isEmpty {
             markdown += "### 📝 当前字幕\n\n"
