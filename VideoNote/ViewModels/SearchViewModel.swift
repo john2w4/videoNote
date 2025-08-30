@@ -17,10 +17,6 @@ class SearchViewModel: NSObject, ObservableObject {
     @Published var errorMessage: String?
     @Published var showingExportSheet = false
     
-    // MARK: - VLC Player Support
-    @Published var vlcPlayerController: VLCPlayerController?
-    @Published var useVLCPlayer = false
-    
     // MARK: - Search State Persistence
     @Published var savedSearchText = ""
     @Published var savedSearchResults: [SearchResult] = []
@@ -435,15 +431,9 @@ class SearchViewModel: NSObject, ObservableObject {
     /// 获取视频格式支持信息
     func getVideoFormatInfo() -> String {
         let formats = Self.supportedVideoFormats.map { $0.uppercased() }.joined(separator: ", ")
-        let availablePlayers = getAvailableExternalPlayers()
         
         var info = "支持的视频格式: \(formats)\n"
-        
-        if availablePlayers.isEmpty {
-            info += "注意: MKV 文件可能需要外部播放器支持"
-        } else {
-            info += "外部播放器: \(availablePlayers.joined(separator: ", "))"
-        }
+        info += "注意: MKV 文件可能需要外部播放器支持"
         
         return info
     }
@@ -461,87 +451,21 @@ class SearchViewModel: NSObject, ObservableObject {
         """
     }
     
-    /// 检查外部播放器是否可用
-    func getAvailableExternalPlayers() -> [String] {
-        var availablePlayers: [String] = []
-        
-        let players = [
-            ("VLC", "org.videolan.vlc"),
-            ("IINA", "com.colliderli.iina"),
-            ("QuickTime Player", "com.apple.QuickTimePlayerX"),
-            ("Infuse 7", "com.firecore.infuse")
-        ]
-        
-        for (name, bundleId) in players {
-            if NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil {
-                availablePlayers.append(name)
-            }
-        }
-        
-        return availablePlayers
-    }
-    
-    /// 用外部播放器打开视频文件
-    func openWithExternalPlayer(_ videoFile: VideoFile, playerBundleId: String? = nil) {
-        let url = videoFile.url
-        
-        if let bundleId = playerBundleId {
-            // 用指定的应用程序打开
-            NSWorkspace.shared.open([url], withApplicationAt: NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)!, configuration: NSWorkspace.OpenConfiguration(), completionHandler: { app, error in
-                if let error = error {
-                    DispatchQueue.main.async {
-                        self.errorMessage = "无法启动外部播放器: \(error.localizedDescription)"
-                    }
-                } else {
-                    print("✅ 已用外部播放器打开: \(videoFile.name)")
-                }
-            })
-        } else {
-            // 用默认应用程序打开
-            NSWorkspace.shared.open(url)
-        }
-    }
-    
-    /// 获取播放器下载链接
-    func getPlayerDownloadInfo() -> [(name: String, url: String)] {
-        return [
-            ("VLC Media Player", "https://www.videolan.org/vlc/download-macos.html"),
-            ("IINA", "https://iina.io/"),
-            ("Infuse 7", "https://apps.apple.com/app/infuse-7/id1136220934")
-        ]
-    }
-    
-    /// 打开播放器下载页面
-    func openPlayerDownloadPage(for playerName: String) {
-        let downloadInfo = getPlayerDownloadInfo()
-        guard let info = downloadInfo.first(where: { $0.name == playerName }),
-              let url = URL(string: info.url) else { return }
-        
-        NSWorkspace.shared.open(url)
-    }
-    
     // MARK: - Player Control
     
     /// 切换播放/暂停状态
     func togglePlayPause() {
-        if useVLCPlayer, let vlcController = vlcPlayerController {
-            vlcController.togglePlayPause()
-        } else if let player = player {
-            if player.rate == 0 {
-                player.play()
-            } else {
-                player.pause()
-            }
+        guard let player = player else { return }
+        
+        if player.rate == 0 {
+            player.play()
+        } else {
+            player.pause()
         }
     }
     
     /// 后退指定秒数
     func rewind(by seconds: TimeInterval) {
-        if useVLCPlayer, let vlcController = vlcPlayerController {
-            vlcController.rewind(by: seconds)
-            return
-        }
-        
         guard let player = player else { 
             print("⚠️ 后退失败: 播放器不存在")
             return 
@@ -575,11 +499,6 @@ class SearchViewModel: NSObject, ObservableObject {
     
     /// 快进指定秒数
     func fastForward(by seconds: TimeInterval) {
-        if useVLCPlayer, let vlcController = vlcPlayerController {
-            vlcController.fastForward(by: seconds)
-            return
-        }
-        
         guard let player = player else { 
             print("⚠️ 快进失败: 播放器不存在")
             return 

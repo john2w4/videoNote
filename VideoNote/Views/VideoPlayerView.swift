@@ -1,46 +1,26 @@
 import SwiftUI
 import AVKit
 
-/// 视频播放器视图
+/// 视频播放器视图 - 修复Archive构建崩溃问题
 struct VideoPlayerView: View {
     @ObservedObject var viewModel: SearchViewModel
     @FocusState private var isFocused: Bool
-    @State private var useVLCPlayer = false
+    @State private var isPlayerReady = false
     
     var body: some View {
         ZStack {
-            if useVLCPlayer, let currentVideoFile = viewModel.currentVideoFile {
-                // 使用 VLC 播放器
-                VLCPlayerView(viewModel: viewModel, videoURL: currentVideoFile.url)
-                    .onAppear {
-                        print("🎬 切换到 VLC 播放器")
-                    }
-                    .focused($isFocused)
-                    .onTapGesture {
-                        isFocused = true
-                    }
-            } else if let player = viewModel.player {
-                // 使用系统默认播放器
-                VideoPlayer(player: player)
-                    .onAppear {
-                        // 播放器出现时自动播放
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            player.play()
-                        }
-                    }
-                    .focused($isFocused)
-                    .onTapGesture {
-                        isFocused = true
-                    }
+            if let player = viewModel.player, isPlayerReady {
+                // 使用SafeVideoPlayerView来避免Archive优化问题
+                SafeVideoPlayerView(player: player)
+                    .id(viewModel.currentVideoFile?.url.path ?? "")
             } else {
                 // 占位视图
                 placeholderView
             }
             
-            // 错误提示和外部播放器选项
-            if let errorMessage = viewModel.errorMessage, 
-               let currentVideo = viewModel.currentVideoFile {
-                errorOverlay(errorMessage: errorMessage, videoFile: currentVideo)
+            // 错误提示
+            if let errorMessage = viewModel.errorMessage {
+                errorOverlay(errorMessage: errorMessage)
             }
             
             // 字幕显示层
@@ -50,6 +30,17 @@ struct VideoPlayerView: View {
         .cornerRadius(8)
         .onAppear {
             isFocused = true
+            // 延迟初始化播放器以确保完全加载
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isPlayerReady = true
+            }
+        }
+        .onChange(of: viewModel.player) { _ in
+            // 当播放器改变时重新初始化
+            isPlayerReady = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isPlayerReady = true
+            }
         }
     }
     
@@ -79,7 +70,7 @@ struct VideoPlayerView: View {
     }
     
     @ViewBuilder
-    private func errorOverlay(errorMessage: String, videoFile: VideoFile) -> some View {
+    private func errorOverlay(errorMessage: String) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 40))
@@ -98,83 +89,11 @@ struct VideoPlayerView: View {
             }
             .frame(maxHeight: 100)
             
-            if videoFile.url.pathExtension.lowercased() == "mkv" {
-                VStack(spacing: 8) {
-                    // VLC 集成播放器选项
-                    Button("使用内置 VLC 播放器") {
-                        viewModel.errorMessage = nil
-                        useVLCPlayer = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    
-                    let availablePlayers = viewModel.getAvailableExternalPlayers()
-                    
-                    if !availablePlayers.isEmpty {
-                        Text("或使用外部播放器:")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        HStack {
-                            if availablePlayers.contains("VLC") {
-                                Button("用 VLC 打开") {
-                                    viewModel.openWithExternalPlayer(videoFile, playerBundleId: "org.videolan.vlc")
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                            }
-                            
-                            if availablePlayers.contains("IINA") {
-                                Button("用 IINA 打开") {
-                                    viewModel.openWithExternalPlayer(videoFile, playerBundleId: "com.colliderli.iina")
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                            }
-                        }
-                    }
-                    
-                    // 如果没有可用的外部播放器，提供下载链接
-                    if availablePlayers.isEmpty {
-                        Text("推荐下载:")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        HStack {
-                            Button("下载 VLC") {
-                                viewModel.openPlayerDownloadPage(for: "VLC Media Player")
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            
-                            Button("下载 IINA") {
-                                viewModel.openPlayerDownloadPage(for: "IINA")
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-                    
-                    Button("用默认播放器打开") {
-                        viewModel.openWithExternalPlayer(videoFile)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    
-                    Button("关闭错误提示") {
-                        viewModel.errorMessage = nil
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .foregroundColor(.secondary)
-                }
-            } else {
-                Button("关闭") {
-                    viewModel.errorMessage = nil
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            Button("关闭") {
+                viewModel.errorMessage = nil
             }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
         .padding()
         .frame(maxWidth: 300)
@@ -183,18 +102,15 @@ struct VideoPlayerView: View {
                 .fill(.regularMaterial)
                 .shadow(radius: 8)
         )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.3))
+        .onTapGesture {
+            viewModel.errorMessage = nil
+        }
     }
 }
 
 #Preview {
-    // For preview, we need a mock view model
-    struct PreviewWrapper: View {
-        @StateObject var viewModel = SearchViewModel()
-        
-        var body: some View {
-            VideoPlayerView(viewModel: viewModel)
-                .frame(width: 400, height: 300)
-        }
-    }
-    return PreviewWrapper()
+    VideoPlayerView(viewModel: SearchViewModel())
+        .frame(width: 400, height: 300)
 }
