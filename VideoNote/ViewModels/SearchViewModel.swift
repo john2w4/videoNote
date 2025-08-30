@@ -161,13 +161,23 @@ class SearchViewModel: NSObject, ObservableObject {
             .sink { [weak self] newContent in
                 guard let self = self else { return }
                 
-                // 检查是否有未保存的更改
-                self.hasUnsavedChanges = newContent != self.noteContent
+                // 更新未保存更改状态
+                self.updateHasUnsavedChangesInternal()
                 
                 // 重置自动保存定时器
                 self.resetAutoSaveTimer()
             }
             .store(in: &cancellables)
+    }
+    
+    /// 内部更新未保存更改状态的方法
+    private func updateHasUnsavedChangesInternal() {
+        hasUnsavedChanges = editingNoteContent != noteContent
+    }
+    
+    /// 手动更新未保存更改状态（从UI调用）
+    func updateHasUnsavedChanges() {
+        updateHasUnsavedChangesInternal()
     }
     
     private func resetAutoSaveTimer() {
@@ -307,26 +317,35 @@ class SearchViewModel: NSObject, ObservableObject {
     /// 执行搜索
     private func performSearch(_ query: String) {
         // 防止搜索死循环
-        guard !isPerformingSearch else { return }
+        guard !isPerformingSearch else { 
+            print("🚫 搜索被阻止，已在执行中")
+            return 
+        }
         isPerformingSearch = true
         
         defer { isPerformingSearch = false }
         
         guard !query.isEmpty else {
             searchResults = []
+            print("🔍 搜索词为空，清空结果")
             return
         }
         
         // 解析多个搜索词
         let searchTerms = parseSearchTerms(query)
-        print("🔍 搜索词解析: \(searchTerms)")
+        print("🔍 搜索词解析: \(searchTerms)，字幕条目总数: \(subtitleEntries.count)")
         
         let results = subtitleEntries
             .filter { entry in
                 // 只要匹配任意一个搜索词就返回true
-                searchTerms.contains { term in
-                    entry.content.localizedCaseInsensitiveContains(term)
+                let matched = searchTerms.contains { term in
+                    let contains = entry.content.localizedCaseInsensitiveContains(term)
+                    if contains {
+                        print("✅ 匹配到: '\(term)' 在 '\(entry.content.prefix(50))...'")
+                    }
+                    return contains
                 }
+                return matched
             }
             .map { entry in
                 SearchResult(subtitleEntry: entry, searchKeyword: query)
@@ -336,6 +355,7 @@ class SearchViewModel: NSObject, ObservableObject {
                 result1.subtitleEntry.startTime < result2.subtitleEntry.startTime
             }
         
+        print("🔍 搜索完成，找到 \(results.count) 条结果")
         searchResults = results
     }
     
@@ -344,10 +364,17 @@ class SearchViewModel: NSObject, ObservableObject {
         // 支持中文逗号（，）和英文逗号（,）分隔
         let separators = CharacterSet(charactersIn: ",，")
         
-        return query
+        let terms = query
             .components(separatedBy: separators)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        
+        // 如果没有找到分隔符，返回原查询词（去除首尾空格）
+        if terms.count == 1 && terms.first == query.trimmingCharacters(in: .whitespacesAndNewlines) {
+            return [query.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        
+        return terms
     }
     
     /// 获取当前搜索词数量
@@ -1182,10 +1209,27 @@ class SearchViewModel: NSObject, ObservableObject {
     func searchCurrentVideoSubtitles(_ query: String) -> [SearchResult] {
         guard !query.isEmpty else { return [] }
         
-        return currentSubtitles
-            .filter { $0.content.localizedCaseInsensitiveContains(query) }
-            .map { SearchResult(subtitleEntry: $0, searchKeyword: query) }
-            .sorted { $0.subtitleEntry.startTime < $1.subtitleEntry.startTime }
+        // 先用,和，对输入字符串进行分割
+        let searchTerms = parseSearchTerms(query)
+        print("🔍 当前视频字幕搜索词解析: \(searchTerms)")
+        
+        // 使用分割之后的子串数组分别对字幕进行搜索，然后合并结果
+        var allResults: [SearchResult] = []
+        
+        for term in searchTerms {
+            let termResults = currentSubtitles
+                .filter { $0.content.localizedCaseInsensitiveContains(term) }
+                .map { SearchResult(subtitleEntry: $0, searchKeyword: query) }
+            
+            allResults.append(contentsOf: termResults)
+        }
+        
+        // 去重（同一字幕条目可能被多个关键词匹配到）
+        let uniqueResults = Dictionary(grouping: allResults) { $0.subtitleEntry.id }
+            .compactMap { (_, results) in results.first }
+        
+        // 使用startTime排序
+        return uniqueResults.sorted { $0.subtitleEntry.startTime < $1.subtitleEntry.startTime }
     }
     
     private func setupPlayerObserver() {

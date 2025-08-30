@@ -137,12 +137,25 @@ struct SearchResultRow: View {
     private var attributedContent: AttributedString {
         var attributedString = AttributedString(result.subtitleEntry.content)
         
-        // 高亮搜索关键词
-        if !result.searchKeyword.isEmpty {
-            let range = attributedString.range(of: result.searchKeyword, options: [.caseInsensitive, .diacriticInsensitive])
-            if let range = range {
-                attributedString[range].backgroundColor = Color.yellow.opacity(0.3)
-                attributedString[range].foregroundColor = Color.primary
+        // 高亮所有搜索关键词
+        for term in result.searchTerms {
+            guard !term.isEmpty else { continue }
+            
+            let content = String(attributedString.characters)
+            var searchStartIndex = content.startIndex
+            
+            while searchStartIndex < content.endIndex {
+                if let range = content.range(of: term, options: [.caseInsensitive, .diacriticInsensitive], range: searchStartIndex..<content.endIndex) {
+                    // 转换为 AttributedString 的范围
+                    if let attributedRange = Range(range, in: attributedString) {
+                        attributedString[attributedRange].backgroundColor = Color.yellow.opacity(0.3)
+                        attributedString[attributedRange].foregroundColor = Color.primary
+                        attributedString[attributedRange].font = .body.weight(.semibold)
+                    }
+                    searchStartIndex = range.upperBound
+                } else {
+                    break
+                }
             }
         }
         

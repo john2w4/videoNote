@@ -207,7 +207,8 @@ struct NoteEditTabView: View {
                 CursorAwareTextEditor(
                     text: $viewModel.editingNoteContent,
                     onTextChange: { newText in
-                        // hasUnsavedChanges 现在由 ViewModel 的 setupAutoSave 自动管理
+                        // 确保 hasUnsavedChanges 状态正确更新
+                        viewModel.updateHasUnsavedChanges()
                     },
                     onCursorPositionChange: { position in
                         viewModel.updateCursorPosition(position)
