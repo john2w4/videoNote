@@ -5,7 +5,7 @@ import Combine
 
 /// 搜索视图模型 - 管理应用的主要状态和逻辑
 @MainActor
-class SearchViewModel: ObservableObject {
+class SearchViewModel: NSObject, ObservableObject {
     
     // MARK: - Published Properties
     @Published var searchText = ""
@@ -16,6 +16,10 @@ class SearchViewModel: ObservableObject {
     @Published var player: AVPlayer?
     @Published var errorMessage: String?
     @Published var showingExportSheet = false
+    
+    // MARK: - VLC Player Support
+    @Published var vlcPlayerController: VLCPlayerController?
+    @Published var useVLCPlayer = false
     
     // MARK: - Search State Persistence
     @Published var savedSearchText = ""
@@ -65,13 +69,31 @@ class SearchViewModel: ObservableObject {
     private var isPerformingSearch = false // 防止搜索死循环
     private var timeObserverToken: Any?
     
-    // MARK: - Initialization
-    init() {
+        // MARK: - Initialization
+    override init() {
+        super.init()
         setupSearchBinding()
-        loadPersistedWorkingDirectory()
         setupPlayerObserver()
-        setupAutoSave()
-        setupTabChangeObserver()
+        
+        // 从 UserDefaults 恢复工作目录
+        if let savedPath = userDefaults.string(forKey: workingDirectoryKey) {
+            workingDirectory = URL(fileURLWithPath: savedPath)
+        }
+    }
+    
+    deinit {
+        // 移除通知观察者
+        NotificationCenter.default.removeObserver(self)
+        
+        // 移除播放器观察者 - 需要在主线程执行
+        Task { @MainActor in
+            if let token = timeObserverToken {
+                player?.removeTimeObserver(token)
+            }
+            
+            // 移除 KVO 观察者
+            player?.currentItem?.removeObserver(self, forKeyPath: #keyPath(AVPlayerItem.status))
+        }
     }
     
     // MARK: - Tab State Management
@@ -269,7 +291,7 @@ class SearchViewModel: ObservableObject {
             let pathExtension = fileURL.pathExtension.lowercased()
             
             // 检查视频文件
-            if ["mp4", "mov", "mkv", "avi", "m4v", "wmv", "flv"].contains(pathExtension) {
+            if Self.isVideoFormat(pathExtension) {
                 var videoFile = VideoFile(url: fileURL)
                 videoFile.associatedSubtitles = videoFile.findAssociatedSubtitles(in: fileURL.deletingLastPathComponent())
                 videoFile.associatedNotes = videoFile.findAssociatedNotes(in: fileURL.deletingLastPathComponent())
@@ -375,7 +397,7 @@ class SearchViewModel: ObservableObject {
     }
     
     private func findVideoURL(for subtitleURL: URL) -> URL? {
-        let videoExtensions = ["mp4", "mov", "mkv", "avi", "m4v", "wmv", "flv"]
+        let videoExtensions = Self.supportedVideoFormats
         let baseName = subtitleURL.deletingPathExtension().lastPathComponent
 
         // 查找所有视频文件
@@ -398,20 +420,128 @@ class SearchViewModel: ObservableObject {
         return nil
     }
     
+    // MARK: - Video Format Support
+    
+    /// 获取支持的视频格式列表
+    static var supportedVideoFormats: [String] {
+        return ["mp4", "mov", "mkv", "avi", "m4v", "wmv", "flv"]
+    }
+    
+    /// 检查文件扩展名是否为支持的视频格式
+    static func isVideoFormat(_ fileExtension: String) -> Bool {
+        return supportedVideoFormats.contains(fileExtension.lowercased())
+    }
+    
+    /// 获取视频格式支持信息
+    func getVideoFormatInfo() -> String {
+        let formats = Self.supportedVideoFormats.map { $0.uppercased() }.joined(separator: ", ")
+        let availablePlayers = getAvailableExternalPlayers()
+        
+        var info = "支持的视频格式: \(formats)\n"
+        
+        if availablePlayers.isEmpty {
+            info += "注意: MKV 文件可能需要外部播放器支持"
+        } else {
+            info += "外部播放器: \(availablePlayers.joined(separator: ", "))"
+        }
+        
+        return info
+    }
+    
+    /// 检查 MKV 格式兼容性
+    func checkMKVCompatibility(for url: URL) -> String? {
+        guard url.pathExtension.lowercased() == "mkv" else { return nil }
+        
+        return """
+        MKV 格式提示:
+        • macOS 原生支持有限
+        • 建议安装 VLC Media Player
+        • 或转换为 MP4/MOV 格式
+        • 部分编解码器可能不兼容
+        """
+    }
+    
+    /// 检查外部播放器是否可用
+    func getAvailableExternalPlayers() -> [String] {
+        var availablePlayers: [String] = []
+        
+        let players = [
+            ("VLC", "org.videolan.vlc"),
+            ("IINA", "com.colliderli.iina"),
+            ("QuickTime Player", "com.apple.QuickTimePlayerX"),
+            ("Infuse 7", "com.firecore.infuse")
+        ]
+        
+        for (name, bundleId) in players {
+            if NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil {
+                availablePlayers.append(name)
+            }
+        }
+        
+        return availablePlayers
+    }
+    
+    /// 用外部播放器打开视频文件
+    func openWithExternalPlayer(_ videoFile: VideoFile, playerBundleId: String? = nil) {
+        let url = videoFile.url
+        
+        if let bundleId = playerBundleId {
+            // 用指定的应用程序打开
+            NSWorkspace.shared.open([url], withApplicationAt: NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)!, configuration: NSWorkspace.OpenConfiguration(), completionHandler: { app, error in
+                if let error = error {
+                    DispatchQueue.main.async {
+                        self.errorMessage = "无法启动外部播放器: \(error.localizedDescription)"
+                    }
+                } else {
+                    print("✅ 已用外部播放器打开: \(videoFile.name)")
+                }
+            })
+        } else {
+            // 用默认应用程序打开
+            NSWorkspace.shared.open(url)
+        }
+    }
+    
+    /// 获取播放器下载链接
+    func getPlayerDownloadInfo() -> [(name: String, url: String)] {
+        return [
+            ("VLC Media Player", "https://www.videolan.org/vlc/download-macos.html"),
+            ("IINA", "https://iina.io/"),
+            ("Infuse 7", "https://apps.apple.com/app/infuse-7/id1136220934")
+        ]
+    }
+    
+    /// 打开播放器下载页面
+    func openPlayerDownloadPage(for playerName: String) {
+        let downloadInfo = getPlayerDownloadInfo()
+        guard let info = downloadInfo.first(where: { $0.name == playerName }),
+              let url = URL(string: info.url) else { return }
+        
+        NSWorkspace.shared.open(url)
+    }
+    
     // MARK: - Player Control
     
     /// 切换播放/暂停状态
     func togglePlayPause() {
-        guard let player = player else { return }
-        if player.rate == 0 {
-            player.play()
-        } else {
-            player.pause()
+        if useVLCPlayer, let vlcController = vlcPlayerController {
+            vlcController.togglePlayPause()
+        } else if let player = player {
+            if player.rate == 0 {
+                player.play()
+            } else {
+                player.pause()
+            }
         }
     }
     
     /// 后退指定秒数
     func rewind(by seconds: TimeInterval) {
+        if useVLCPlayer, let vlcController = vlcPlayerController {
+            vlcController.rewind(by: seconds)
+            return
+        }
+        
         guard let player = player else { 
             print("⚠️ 后退失败: 播放器不存在")
             return 
@@ -445,6 +575,11 @@ class SearchViewModel: ObservableObject {
     
     /// 快进指定秒数
     func fastForward(by seconds: TimeInterval) {
+        if useVLCPlayer, let vlcController = vlcPlayerController {
+            vlcController.fastForward(by: seconds)
+            return
+        }
+        
         guard let player = player else { 
             print("⚠️ 快进失败: 播放器不存在")
             return 
@@ -568,10 +703,51 @@ class SearchViewModel: ObservableObject {
         
         currentVideoFile = videoFile
         
-        // 加载视频到播放器
+        // 加载视频到播放器，使用更宽容的方法
         let playerItem = AVPlayerItem(url: videoFile.url)
         player = AVPlayer(playerItem: playerItem)
-        print("🎬 加载新视频: \(videoFile.name)")
+        print("🎬 加载新视频: \(videoFile.name) (格式: \(videoFile.url.pathExtension.uppercased()))")
+        
+        // 异步检查视频资源
+        Task {
+            do {
+                let asset = AVAsset(url: videoFile.url)
+                let duration = try await asset.load(.duration)
+                let isPlayable = try await asset.load(.isPlayable)
+                
+                await MainActor.run {
+                    if !isPlayable || !duration.isValid {
+                        print("⚠️ 视频文件检查失败: \(videoFile.name)")
+                        // 不立即报错，而是警告，让用户尝试播放
+                        print("📝 提示: MKV 文件可能需要额外的解码器支持")
+                    } else {
+                        print("✅ 视频文件验证成功: \(videoFile.name)")
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    print("⚠️ 视频资源加载警告: \(error.localizedDescription)")
+                    print("📝 将尝试播放，某些格式可能需要系统解码器支持")
+                }
+            }
+        }
+        
+        // 监听播放器状态变化
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
+                    print("❌ 视频播放失败: \(error.localizedDescription)")
+                    self?.errorMessage = "视频播放失败: \(error.localizedDescription)"
+                }
+            }
+        }
+        
+        // 监听播放器项目状态
+        playerItem.addObserver(self, forKeyPath: #keyPath(AVPlayerItem.status), options: [.new], context: nil)
         
         // 自动播放视频
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -1177,6 +1353,46 @@ class SearchViewModel: ObservableObject {
         // 4. 清理其他资源
         self.player = nil
         print("✅ 应用清理完成")
+    }
+}
+
+// MARK: - KVO Observer
+extension SearchViewModel {
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+        if keyPath == #keyPath(AVPlayerItem.status), let playerItem = object as? AVPlayerItem {
+            DispatchQueue.main.async {
+                switch playerItem.status {
+                case .readyToPlay:
+                    print("✅ 播放器已准备就绪")
+                    self.errorMessage = nil
+                case .failed:
+                    if let error = playerItem.error {
+                        print("❌ 播放器加载失败: \(error.localizedDescription)")
+                        self.errorMessage = "视频加载失败: \(error.localizedDescription)"
+                        
+                        // 针对 MKV 文件给出特殊提示
+                        if let currentVideo = self.currentVideoFile, 
+                           currentVideo.url.pathExtension.lowercased() == "mkv" {
+                            self.errorMessage = """
+                            MKV 文件播放失败 - 该格式需要额外支持
+                            
+                            解决方案：
+                            1. 安装 VLC Media Player (推荐)
+                            2. 安装 IINA 播放器
+                            3. 转换为 MP4/MOV 格式
+                            4. 安装系统解码器包
+                            
+                            详细错误: \(error.localizedDescription)
+                            """
+                        }
+                    }
+                case .unknown:
+                    print("⏳ 播放器状态未知")
+                @unknown default:
+                    break
+                }
+            }
+        }
     }
 }
 

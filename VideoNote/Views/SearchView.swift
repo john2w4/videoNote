@@ -210,6 +210,13 @@ struct SearchView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
             
+            // 显示支持的视频格式
+            Text(viewModel.getVideoFormatInfo())
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal)
+                .multilineTextAlignment(.center)
+            
             Button("选择目录") {
                 viewModel.selectWorkingDirectory()
             }
