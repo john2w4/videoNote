@@ -42,6 +42,12 @@ struct ContentView: View {
             .frame(minWidth: 400)
         }
         .navigationTitle("VidSearch")
+        .onAppear {
+            // 确保窗口能够接收键盘事件
+            DispatchQueue.main.async {
+                NSApp.windows.first?.makeKey()
+            }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Button("选择目录") {

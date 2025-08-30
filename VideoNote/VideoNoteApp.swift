@@ -81,6 +81,51 @@ struct VideoNoteApp: App {
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
+        .commands {
+            // 播放控制命令
+            CommandMenu("播放控制") {
+                Button("切换播放/暂停") {
+                    searchViewModel.togglePlayPause()
+                }
+                .keyboardShortcut(" ", modifiers: [])
+
+                Button("后退 5 秒") {
+                    searchViewModel.rewind(by: 5)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+
+                Button("快进 5 秒") {
+                    searchViewModel.fastForward(by: 5)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+            }
+            
+            // 自定义菜单命令
+            CommandGroup(replacing: .newItem) {
+                Button("选择视频目录...") {
+                    // 这里可以通过通知或其他方式触发目录选择
+                }
+                .keyboardShortcut("o", modifiers: .command)
+            }
+            
+            CommandGroup(after: .importExport) {
+                Button("导出搜索结果...") {
+                    // 这里可以通过通知或其他方式触发导出
+                }
+                .keyboardShortcut("e", modifiers: .command)
+            }
+            
+            // 修改退出命令以执行清理
+            CommandGroup(replacing: .appTermination) {
+                Button("退出 VideoNote") {
+                    Task { @MainActor in
+                        searchViewModel.prepareForExit()
+                        NSApp.terminate(nil)
+                    }
+                }
+                .keyboardShortcut("q", modifiers: .command)
+            }
+        }
     }
     
     private func setupWindowDelegate() {
