@@ -1,55 +1,51 @@
 import SwiftUI
 import AppKit
 
-/// 支持光标位置管理的自定义文本编辑器
-struct CursorAwareTextEditor: NSViewRepresentable {
+/// 简化的中文友好文本编辑器
+struct SimplifiedTextEditor: NSViewRepresentable {
     @Binding var text: String
     let onTextChange: (String) -> Void
     let onCursorPositionChange: (Int) -> Void
-    let onCoordinatorReady: (Coordinator) -> Void
     
     init(text: Binding<String>, 
-         onTextChange: @escaping (String) -> Void, 
-         onCursorPositionChange: @escaping (Int) -> Void,
-         onCoordinatorReady: @escaping (Coordinator) -> Void = { _ in }) {
+         onTextChange: @escaping (String) -> Void = { _ in }, 
+         onCursorPositionChange: @escaping (Int) -> Void = { _ in }) {
         self._text = text
         self.onTextChange = onTextChange
         self.onCursorPositionChange = onCursorPositionChange
-        self.onCoordinatorReady = onCoordinatorReady
     }
     
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSTextView.scrollableTextView()
         let textView = scrollView.documentView as! NSTextView
         
+        // 基本设置
         textView.delegate = context.coordinator
         textView.string = text
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        // 保持 isAutomaticTextReplacementEnabled = true 以支持中文输入法
-        textView.isAutomaticTextReplacementEnabled = true
-        textView.isAutomaticSpellingCorrectionEnabled = false
-        
-        // 确保支持中文输入法的关键设置
-        textView.allowsDocumentBackgroundColorChange = true
-        textView.usesFindBar = true
-        textView.isRichText = false
-        textView.isEditable = true
-        textView.isSelectable = true
-        
-        // 重要：明确启用输入法支持
-        textView.markedTextAttributes = [
-            .backgroundColor: NSColor.selectedTextBackgroundColor.withAlphaComponent(0.3),
-            .underlineStyle: NSUnderlineStyle.single.rawValue
-        ]
-        
-        // 设置输入源处理
-        textView.isAutomaticDataDetectionEnabled = false
-        textView.isAutomaticLinkDetectionEnabled = false
-        
         textView.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
         textView.textColor = NSColor.labelColor
         textView.backgroundColor = NSColor.textBackgroundColor
+        
+        // 中文输入法支持 - 关键设置
+        textView.isAutomaticTextReplacementEnabled = true  // 必须为 true
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.allowsUndo = true
+        
+        // 标记文本样式 - 用于显示拼音等临时文本
+        textView.markedTextAttributes = [
+            .backgroundColor: NSColor.selectedTextBackgroundColor.withAlphaComponent(0.2),
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
+        
+        // 禁用其他自动功能，但保持文本替换
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        
+        // 布局设置
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.textContainer?.widthTracksTextView = true
@@ -57,26 +53,24 @@ struct CursorAwareTextEditor: NSViewRepresentable {
         
         context.coordinator.textView = textView
         
-        // 通知协调器已准备好
-        DispatchQueue.main.async {
-            onCoordinatorReady(context.coordinator)
-        }
-        
         return scrollView
     }
     
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         let textView = scrollView.documentView as! NSTextView
         
-        // 重要：避免在输入法激活时更新文本，否则会中断中文输入
-        if textView.hasMarkedText() {
+        // 重要：不在输入法激活时更新文本
+        guard !textView.hasMarkedText() else {
             return
         }
         
         if textView.string != text {
             let selectedRange = textView.selectedRange()
             textView.string = text
-            textView.setSelectedRange(selectedRange)
+            // 保持光标位置
+            if selectedRange.location <= text.count {
+                textView.setSelectedRange(selectedRange)
+            }
         }
     }
     
@@ -85,15 +79,16 @@ struct CursorAwareTextEditor: NSViewRepresentable {
     }
     
     class Coordinator: NSObject, NSTextViewDelegate {
-        let parent: CursorAwareTextEditor
+        let parent: SimplifiedTextEditor
         weak var textView: NSTextView?
         
-        init(_ parent: CursorAwareTextEditor) {
+        init(_ parent: SimplifiedTextEditor) {
             self.parent = parent
         }
         
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
+            
             DispatchQueue.main.async {
                 self.parent.text = textView.string
                 self.parent.onTextChange(textView.string)
@@ -108,31 +103,14 @@ struct CursorAwareTextEditor: NSViewRepresentable {
             }
         }
         
-        // 重要：处理输入法的标记文本（如拼音输入时的临时文本）
+        // 允许所有文本变化
         func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
-            // 允许所有文本变化，包括输入法的中间状态
             return true
         }
         
-        // 处理输入法完成输入
+        // 让输入法正常处理所有命令
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            // 让输入法正常处理命令
             return false
-        }
-        
-        /// 在光标位置插入文本
-        func insertText(_ text: String) {
-            guard let textView = textView else { return }
-            
-            let selectedRange = textView.selectedRange()
-            textView.insertText(text, replacementRange: selectedRange)
-            
-            // 更新父级绑定
-            DispatchQueue.main.async {
-                self.parent.text = textView.string
-                self.parent.onTextChange(textView.string)
-                self.parent.onCursorPositionChange(textView.selectedRange().location)
-            }
         }
     }
 }
