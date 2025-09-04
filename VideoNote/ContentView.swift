@@ -1,10 +1,12 @@
 import SwiftUI
 import AVKit
+import AppKit
 
 /// 应用主内容视图
 struct ContentView: View {
     @EnvironmentObject var searchViewModel: SearchViewModel
     @State private var showingDirectoryPicker = false
+    @State private var keyMonitor: Any?
     
     var body: some View {
         NavigationSplitView {
@@ -46,6 +48,7 @@ struct ContentView: View {
             // 确保窗口能够接收键盘事件
             DispatchQueue.main.async {
                 NSApp.windows.first?.makeKey()
+                setupKeyboardHandling()
             }
         }
         .toolbar {
@@ -90,6 +93,103 @@ struct ContentView: View {
                 await searchViewModel.scanWorkingDirectory()
             }
         }
+        .onDisappear {
+            // 清理键盘监听器
+            if let keyMonitor = keyMonitor {
+                NSEvent.removeMonitor(keyMonitor)
+            }
+        }
+    }
+    
+    /// 设置键盘事件处理
+    private func setupKeyboardHandling() {
+        // 移除现有的监听器
+        if let keyMonitor = keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+        }
+        
+        print("设置键盘监听器...")
+        
+        // 添加本地键盘监听器
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            print("键盘事件 - keyCode: \(event.keyCode), modifiers: \(event.modifierFlags)")
+            
+            // 检查是否是空格键且没有修饰键
+            if event.keyCode == 49 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
+                print("检测到空格键按下")
+                let textEditorFocused = isTextEditorFocused()
+                print("文本编辑器获得焦点: \(textEditorFocused)")
+                
+                // 只有当前没有文本编辑器获得焦点时才处理空格键
+                if !textEditorFocused {
+                    print("触发视频播放/暂停")
+                    DispatchQueue.main.async {
+                        searchViewModel.togglePlayPause()
+                    }
+                    return nil // 消费这个事件
+                } else {
+                    print("跳过空格键处理 - 文本编辑器获得焦点")
+                }
+            }
+            // 左箭头键 - 后退5秒
+            else if event.keyCode == 123 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
+                print("检测到左箭头键按下")
+                if !isTextEditorFocused() {
+                    print("触发视频后退")
+                    DispatchQueue.main.async {
+                        searchViewModel.rewind(by: 5)
+                    }
+                    return nil
+                }
+            }
+            // 右箭头键 - 快进5秒
+            else if event.keyCode == 124 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
+                print("检测到右箭头键按下")
+                if !isTextEditorFocused() {
+                    print("触发视频快进")
+                    DispatchQueue.main.async {
+                        searchViewModel.fastForward(by: 5)
+                    }
+                    return nil
+                }
+            }
+            
+            return event // 不消费其他事件
+        }
+        
+        // 同时添加全局监听器作为备用
+        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            print("全局键盘事件 - keyCode: \(event.keyCode)")
+            if event.keyCode == 49 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
+                if !isTextEditorFocused() {
+                    print("全局空格键触发视频控制")
+                    DispatchQueue.main.async {
+                        searchViewModel.togglePlayPause()
+                    }
+                }
+            }
+        }
+    }
+    
+    /// 检查是否有文本编辑器获得焦点
+    private func isTextEditorFocused() -> Bool {
+        guard let window = NSApp.keyWindow,
+              let firstResponder = window.firstResponder else {
+            print("没有key window或first responder")
+            return false
+        }
+        
+        let responderType = String(describing: type(of: firstResponder))
+        print("First responder类型: \(responderType)")
+        
+        // 检查first responder是否是文本编辑器相关的类
+        let isTextEditor = firstResponder is NSTextView || 
+               firstResponder is NSTextField ||
+               responderType.contains("TextEditor") ||
+               responderType.contains("TextView")
+        
+        print("是否为文本编辑器: \(isTextEditor)")
+        return isTextEditor
     }
 }
 

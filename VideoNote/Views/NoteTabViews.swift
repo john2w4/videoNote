@@ -202,9 +202,9 @@ struct NoteEditTabView: View {
             
             Divider()
             
-            // 编辑器
+            // 编辑器 - 使用简化版本测试中文输入
             if viewModel.currentNoteFile != nil || !viewModel.editingNoteContent.isEmpty {
-                CursorAwareTextEditor(
+                SimplifiedTextEditor(
                     text: $viewModel.editingNoteContent,
                     onTextChange: { newText in
                         // 确保 hasUnsavedChanges 状态正确更新
@@ -212,9 +212,6 @@ struct NoteEditTabView: View {
                     },
                     onCursorPositionChange: { position in
                         viewModel.updateCursorPosition(position)
-                    },
-                    onCoordinatorReady: { coordinator in
-                        viewModel.setTextEditorCoordinator(coordinator)
                     }
                 )
             } else {

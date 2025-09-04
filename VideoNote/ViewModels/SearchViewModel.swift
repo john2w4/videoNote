@@ -482,12 +482,19 @@ class SearchViewModel: NSObject, ObservableObject {
     
     /// 切换播放/暂停状态
     func togglePlayPause() {
-        guard let player = player else { return }
+        guard let player = player else { 
+            print("⚠️ 切换播放/暂停失败: 播放器不存在")
+            return 
+        }
+        
+        print("🎮 切换播放/暂停状态 - 当前速率: \(player.rate)")
         
         if player.rate == 0 {
             player.play()
+            print("▶️ 开始播放")
         } else {
             player.pause()
+            print("⏸️ 暂停播放")
         }
     }
     
